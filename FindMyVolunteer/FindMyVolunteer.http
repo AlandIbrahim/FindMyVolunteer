@@ -1,0 +1,6 @@
+@FindMyVolunteer_HostAddress = http://localhost:5195
+
+GET {{FindMyVolunteer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
