@@ -26,48 +26,49 @@ namespace FindMyVolunteer.Controllers {
     [Authorize]
     public async Task<IActionResult> GetEvents([FromQuery] bool includePast = true, int page = 1) {
       int id = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-      var events = await db.ParticipationTickets.Where(t => t.VolunteerID == id)
-        .Join(db.Organizations, e => e.Event.OrganizationID, o => o.ID, (t, o) => new { t, o })
-        .Select(j => new {
-          j.t.Event.ID,
-          j.t.Event.Title,
-          Organization = j.o.Name,
-          j.t.Event.City,
-          j.t.Event.Location,
-          j.t.Event.EnrollmentDeadline,
-          j.t.Event.StartDate,
-          j.t.Event.Duration
-        }).OrderBy(e => e.EnrollmentDeadline).ThenBy(e => e.StartDate).Skip((page - 1) * 5).Take(5).ToListAsync();
-      string role = User.FindFirst(ClaimTypes.Role)!.Value;
-      switch(role) {
-        case "Volunteer":
-          return Ok(await db.ParticipationTickets.Where(t => t.VolunteerID == id)
-         .Join(db.Organizations, e => e.Event.OrganizationID, o => o.ID, (t, o) => new { t, o })
-         .Select(j => new {
-           j.t.Event.ID,
-           j.t.Event.Title,
-           Organization = j.o.Name,
-           j.t.Event.City,
-           j.t.Event.Location,
-           j.t.Event.EnrollmentDeadline,
-           j.t.Event.StartDate,
-           j.t.Event.Duration
-         }).OrderBy(e => e.EnrollmentDeadline).ThenBy(e => e.StartDate).Skip((page - 1) * 5).Take(5).ToListAsync());
-        case "Organization":
-          return Ok(await db.Events.Where(e => e.OrganizationID == id)
+      return User.FindFirst(ClaimTypes.Role)!.Value switch {
+        "Volunteer" => Ok(await db.ParticipationTickets.Where(t => t.VolunteerID == id)
+                 .Join(db.Organizations, e => e.Event.OrganizationID, o => o.ID, (t, o) => new { t, o })
+                 .Select(j => new {
+                   j.t.Event.ID,
+                   j.t.Event.Title,
+                   Organization = j.o.Name,
+                   j.t.Event.City,
+                   j.t.Event.Location,
+                   j.t.Event.EnrollmentDeadline,
+                   j.t.Event.StartDate,
+                   j.t.Event.Duration,
+                   Status = Translator.EventStatus(
+                     j.t.Event.EnrollmentDeadline,
+                     j.t.Event.StartDate,
+                     j.t.Event.EndDate,
+                     true,
+                     j.t.Attended,
+                     j.t.Event.Cancelled,
+                     j.t.Event.CurrentAttendees >= j.t.Event.MaxAttendees
+                   ),
+                 }).OrderBy(e => e.EnrollmentDeadline).ThenBy(e => e.StartDate).Skip((page - 1) * 5).Take(5).ToListAsync()),
+        "Organization" => Ok(await db.Events.Where(e => e.OrganizationID == id)
             .Select(e => new {
               e.ID,
               e.Title,
+              oid = e.OrganizationID,
               Organization = e.Organization.Name,
               e.City,
               e.Location,
               e.EnrollmentDeadline,
               e.StartDate,
               e.Duration,
-            }).ToListAsync());
-        default:
-          return Forbid();
-      }
+              Status = Translator.EventStatus(
+                e.EnrollmentDeadline,
+                e.StartDate,
+                e.EndDate,
+                e.Cancelled,
+                e.CurrentAttendees >= e.MaxAttendees
+              ),
+            }).OrderBy(e => e.EnrollmentDeadline).ThenBy(e => e.StartDate).Skip((page - 1) * 5).Take(5).ToListAsync()),
+        _ => Forbid(),
+      };
     }
     /// <summary>
     /// Lists all the <see cref="Event">events</see>, regardless of the <see cref="Models.Identity.AppUser">user</see>'s participation.
@@ -78,17 +79,25 @@ namespace FindMyVolunteer.Controllers {
       City? city = null;
       nearMe &= int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out int uid);
       return Ok(await db.Events
-        .Where(e => !nearMe || e.City == (city ?? City.Sulaymaniyah))
+        .Where(e => !e.Cancelled && (!nearMe || e.City == (city ?? City.Sulaymaniyah)))
         .Join(db.Organizations, e => e.OrganizationID, o => o.ID, (e, o) => new { e, o })
         .Select(j => new {
           j.e.ID,
           j.e.Title,
+          oid = j.e.OrganizationID,
           Organization = j.o.Name,
           j.e.City,
           j.e.Location,
           j.e.EnrollmentDeadline,
           j.e.StartDate,
-          j.e.Duration
+          j.e.Duration,
+          Status = Translator.EventStatus(
+            j.e.EnrollmentDeadline,
+            j.e.StartDate,
+            j.e.EndDate,
+            j.e.Cancelled,
+            j.e.CurrentAttendees >= j.e.MaxAttendees
+          ),
         }).OrderBy(e => e.EnrollmentDeadline).ThenBy(e => e.StartDate).Skip((page - 1) * 5).Take(5).ToListAsync());
     }
     [HttpGet("search")]
@@ -98,12 +107,29 @@ namespace FindMyVolunteer.Controllers {
         .Select(j => new {
           j.e.ID,
           j.e.Title,
+          Oid = j.e.OrganizationID,
           Organization = j.o.Name,
           j.e.City,
           j.e.Location,
           j.e.EnrollmentDeadline,
           j.e.StartDate,
-          j.e.Duration
+          j.e.Duration,
+          status= User.Identity.IsAuthenticated?Translator.EventStatus(
+            j.e.EnrollmentDeadline,
+            j.e.StartDate,
+            j.e.EndDate,
+            db.ParticipationTickets.Where(t => t.VolunteerID == int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value) && t.EventID == j.e.ID).Any(),
+            db.ParticipationTickets.Where(t => t.VolunteerID == int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value) && t.EventID == j.e.ID).Select(t => t.Attended).FirstOrDefault(),
+            j.e.Cancelled,
+            j.e.CurrentAttendees >= j.e.MaxAttendees
+            )
+          :Translator.EventStatus(
+            j.e.EnrollmentDeadline,
+            j.e.StartDate,
+            j.e.EndDate,
+            j.e.Cancelled,
+            j.e.CurrentAttendees >= j.e.MaxAttendees
+          )
         }).OrderBy(e => e.EnrollmentDeadline).ThenBy(e => e.StartDate).Skip((page - 1) * 5).Take(5).ToListAsync();
       var vols = await db.Volunteers.Where(v => v.FirstName.Contains(search) || (v.MiddleName ?? "").Contains(search) || v.LastName.Contains(search) || v.AppUser.UserName.Contains(search))
         .Select(v => new {
@@ -119,31 +145,6 @@ namespace FindMyVolunteer.Controllers {
         }).Skip((page - 1) * 5).Take(5).ToListAsync();
       return Ok(new { events, vols, orgs });
     }
-    //=> includePast ?
-    //  Ok(await db.Events.Join(db.Organizations, e => e.OrganizationID, o => o.ID, (e, o) => new { e, o })
-    //    .Where(j => !j.e.Cancelled)
-    //    .Select(j => new {
-    //      j.e.ID,
-    //      j.e.Title,
-    //      Organization = j.o.Name,
-    //      j.e.City,
-    //      j.e.Location,
-    //      j.e.EnrollmentDeadline,
-    //      j.e.StartDate,
-    //      j.e.Duration
-    //    }).ToListAsync()) :
-    //  Ok(await db.Events.Join(db.Organizations, e => e.OrganizationID, o => o.ID, (e, o) => new { e, o })
-    //    .Where(j => !j.e.Cancelled && j.e.StartDate >= DateTime.Now)
-    //    .Select(j => new {
-    //      j.e.ID,
-    //      j.e.Title,
-    //      Organization = j.o.Name,
-    //      j.e.City,
-    //      j.e.Location,
-    //      j.e.EnrollmentDeadline,
-    //      j.e.StartDate,
-    //      j.e.Duration
-    //    }).ToListAsync());
     /// <summary>
     /// <para>[<c>any</c>] Details of the event, including Title, Organization, Location, Date, and City.</para>
     /// <para>[<see cref="Volunteer"/>] also includes the participation status.</para>
@@ -151,10 +152,11 @@ namespace FindMyVolunteer.Controllers {
     /// </summary>
     /// <param name="id">the <see cref="Event.ID">event ID</see>.</param>
     [HttpGet("{id}")]
-    public async Task<IActionResult> GetEvent(int id) {
+    public async Task<IActionResult> GetEvent(int id, [FromQuery] bool forEdit) {
+
       _ = int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out int uid);
       if(User.IsInRole("Volunteer"))
-        return new JsonResult(await db.Events.Where(e => e.ID == id).GroupJoin(db.ParticipationTickets, e => e.ID, t => t.EventID, (e, t) => new { e, t })
+        return Ok(await db.Events.Where(e => e.ID == id).GroupJoin(db.ParticipationTickets, e => e.ID, t => t.EventID, (e, t) => new { e, t })
         .Join(db.Organizations, j => j.e.OrganizationID, o => o.ID, (j, o) => new { j.t, j.e, o }).Select(j => new {
           j.e.ID,
           j.e.Title,
@@ -176,8 +178,8 @@ namespace FindMyVolunteer.Controllers {
             j.e.CurrentAttendees >= j.e.MaxAttendees
           )
         }).FirstOrDefaultAsync());
-      if(User.IsInRole("Organization"))
-        return new JsonResult(await db.Events.Where(e => e.ID == id).GroupJoin(db.ParticipationTickets, e => e.ID, t => t.EventID, (e, t) => new { e, t })
+      if(User.IsInRole("Organization")) {
+        var result = await db.Events.Where(e => e.ID == id).GroupJoin(db.ParticipationTickets, e => e.ID, t => t.EventID, (e, t) => new { e, t })
         .Join(db.Organizations, j => j.e.OrganizationID, o => o.ID, (j, o) => new { j.t, j.e, o })
         .Select(j => new {
           j.e.ID,
@@ -190,6 +192,8 @@ namespace FindMyVolunteer.Controllers {
           j.e.StartDate,
           j.e.Duration,
           j.e.Description,
+          j.e.MaxAttendees,
+          skills = db.RequiredSkills.Where(es => es.EventID == id).Select(es => es.Skill.Name).ToList(),
           Status = Translator.EventStatus(
             j.e.EnrollmentDeadline,
             j.e.StartDate,
@@ -203,8 +207,11 @@ namespace FindMyVolunteer.Controllers {
           .Join(db.Volunteers, t => t.VolunteerID, v => v.ID, (t, v) => new { t, v })
           .Select(j => j.v.FirstName + " " + j.v.LastName)
           .ToList() : null
-        }).FirstOrDefaultAsync());
-      return new JsonResult(await db.Events.Where(e => e.ID == id).Join(db.Organizations, e => e.OrganizationID, o => o.ID, (e, o) => new { e, o })
+        }).FirstOrDefaultAsync();
+        if(forEdit && result.OrgId.ToString() != User.FindFirst(ClaimTypes.NameIdentifier)!.Value) return StatusCode(403, "Not the owner");
+        return Ok(result);
+      }
+      return Ok(await db.Events.Where(e => e.ID == id).Join(db.Organizations, e => e.OrganizationID, o => o.ID, (e, o) => new { e, o })
       .Select(j => new {
         j.e.ID,
         j.e.Title,
@@ -315,9 +322,7 @@ namespace FindMyVolunteer.Controllers {
         tasks.Add(emailSender.SendEmailAsync(email, "Event Cancelled", $"The event \"{@event.Title}\" has been cancelled."));
       }
       await Task.WhenAll(tasks);
-      @event.Cancelled = true;
-      db.Events.Update(@event);
-      await db.SaveChangesAsync();
+      await db.Events.Where(e => e.ID == id).ExecuteUpdateAsync(e => e.SetProperty(x => x.Cancelled, true));
       return Ok();
     }
     #region Enrollment
@@ -404,7 +409,7 @@ namespace FindMyVolunteer.Controllers {
           iii = ratings.Count(r => r.Rating == 3),
           ii = ratings.Count(r => r.Rating == 2),
           i = ratings.Count(r => r.Rating == 1),
-          total = ratings.Count()
+          total = ratings.Count == 0 ? 1 : ratings.Count
         };
         var uid = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var rateObj = new {
@@ -414,17 +419,7 @@ namespace FindMyVolunteer.Controllers {
         };
         return Ok(rateObj);
       } catch(Exception e) {
-        return Ok(new {
-          self = 0,
-          Ratings = Array.Empty<EventRating>(),
-          Counts = new {
-            v = 0,
-            iv = 0,
-            iii = 0,
-            ii = 0,
-            i = 0,
-          }
-        });
+        return Ok(new { });
         #endregion
       }
     }
@@ -464,8 +459,8 @@ namespace FindMyVolunteer.Controllers {
     public async Task<IActionResult> DeleteRating(int id) {
       int result;
       int uid = int.Parse(User.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value);
-      try { 
-        result= await db.EventRatings.Where(r => r.FromID == uid && r.ToID == id).ExecuteDeleteAsync();
+      try {
+        result = await db.EventRatings.Where(r => r.FromID == uid && r.ToID == id).ExecuteDeleteAsync();
       } catch(Exception e) {
         return StatusCode(500, e.Message);
       }

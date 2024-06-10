@@ -14,7 +14,7 @@ namespace FindMyVolunteer.Engines {
     public static string EventStatus(DateTime enrollmentDeadline, DateTime startTime, DateTime endTime, bool cancelled = false, bool attendeesMaxed = false) {
       if(cancelled) return "Cancelled";
       if(startTime < DateTime.Now)
-        return endTime < DateTime.Now ? "Live" : "Ended";
+        return endTime < DateTime.Now ? "Ended" : "Live";
       if(enrollmentDeadline < DateTime.Now) return "Upcoming(Enrollment deadline Passed)";
       return attendeesMaxed ? "Upcoming(Full)" : "Upcoming";
     }

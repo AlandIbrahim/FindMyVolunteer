@@ -40,7 +40,7 @@ namespace FindMyVolunteer.Controllers {
         if(org == null) return StatusCode(404);
         return Ok(org);
       }
-      var volunteer = await db.Volunteers.Where(v => v.ID == uid).Select(v => new {
+      var vol = await db.Volunteers.Where(v => v.ID == uid).Select(v => new {
         type="v",
         uid=v.ID.ToString(),
         v.AppUser.UserName,
@@ -51,12 +51,13 @@ namespace FindMyVolunteer.Controllers {
         v.City,
         v.Gender,
       }).FirstOrDefaultAsync();
-      if(volunteer == null) return StatusCode(404);
-      return Ok(volunteer);
+      if(vol == null) return StatusCode(404);
+      return Ok(vol);
     }
     [HttpGet("role")]
     public async Task<IActionResult> GetRole() {
-      return User.IsInRole("Organization") ? Ok("o") : Ok("v");
+      int uid=int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+      return User.IsInRole("Organization") ? Ok("o"+uid) : Ok("v"+uid);
     }
     #region Volunteer
     [HttpPost("vol/register")]
@@ -220,9 +221,10 @@ To validate the user by clicking <a href='{Url.Action("Validate/User?userId=" + 
     #endregion
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDTO user) {
-      LoginResultDTO result = await new UserEngine(uMan, sMan).LoginAsync(user, db);
-      if(result.Errors.Count > 0) return StatusCode(400, DataValidator.FormatErrors(result.Errors));
-      return Ok();
+      AppUser? u = await uMan.FindByNameAsync(user.Username);
+      Microsoft.AspNetCore.Identity.SignInResult result = await sMan.PasswordSignInAsync(u, user.Password, user.StayLoggedIn, false); // check if the password is correct
+      if(!result.Succeeded) return Unauthorized(); // return an error if the password is incorrect
+      return Ok(User.IsInRole("Organization")?"o"+u.Id:"v"+u.Id);
     }
     [HttpGet("logout")]
     public async Task<IActionResult> Logout() {

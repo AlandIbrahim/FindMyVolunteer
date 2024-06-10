@@ -16,9 +16,10 @@ namespace FindMyVolunteer.Data.DataTransfer {
     [JsonIgnore]
     public DateTime DtStartDate { get => _startDate; }
     public string StartDate { get => _startDate.ToString(); set => _startDate = DateTime.Parse(value); }
+    [RegularExpression(@"\d{2}:\d{2}", ErrorMessage = "Duration must be in the format HH:mm")]
     public string Duration { get; set; }
     [JsonIgnore]
-    public DateTime EndDate => _startDate.Add(TimeSpan.Parse(Duration));
+    public DateTime EndDate => _startDate.Add(new TimeSpan(int.Parse(Duration.Split(':')[0]), int.Parse(Duration.Split(':')[1]), 0));
 
     public string Location { get; set; } = string.Empty;
     public City City { get; set; }
